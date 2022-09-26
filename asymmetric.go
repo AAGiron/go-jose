@@ -20,6 +20,7 @@ import (
 	"crypto"
 	"crypto/aes"
 	"crypto/ecdsa"
+	"crypto/liboqs_sig"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha1"
@@ -52,6 +53,10 @@ type edEncrypterVerifier struct {
 	publicKey ed25519.PublicKey
 }
 
+type pqcEncrypterVerifier struct {
+	publicKey *liboqs_sig.PublicKey
+}
+
 // A key generator for ECDH-ES
 type ecKeyGenerator struct {
 	size      int
@@ -67,6 +72,11 @@ type ecDecrypterSigner struct {
 type edDecrypterSigner struct {
 	privateKey ed25519.PrivateKey
 }
+
+type pqcDecrypterSigner struct {
+	privateKey *liboqs_sig.PrivateKey
+}
+
 
 // newRSARecipient creates recipientKeyInfo based on the given key.
 func newRSARecipient(keyAlg KeyAlgorithm, publicKey *rsa.PublicKey) (recipientKeyInfo, error) {
@@ -85,6 +95,35 @@ func newRSARecipient(keyAlg KeyAlgorithm, publicKey *rsa.PublicKey) (recipientKe
 		keyAlg: keyAlg,
 		keyEncrypter: &rsaEncrypterVerifier{
 			publicKey: publicKey,
+		},
+	}, nil
+}
+
+// newPQCRecipient creates a recipientKeyInfo based on the given key
+func newPQCRecipient(keyAlg KeyAlgorithm, pubKey *liboqs_sig.PublicKey) (recipientKeyInfo, error) {
+	if pubKey == nil {
+		return recipientKeyInfo{}, errors.New("invalid public key")
+	}
+
+	return recipientKeyInfo{
+			keyAlg: keyAlg,
+			keyEncrypter: &pqcEncrypterVerifier{ publicKey: pubKey },
+		}, nil
+}
+
+// newPQCSigner creates a recipientSigInfo based on the given key.
+func newPQCSigner(sigAlg SignatureAlgorithm, privateKey *liboqs_sig.PrivateKey) (recipientSigInfo, error) {
+	if privateKey == nil {
+		return recipientSigInfo{}, errors.New("invalid private key")
+	}
+
+	return recipientSigInfo{
+		sigAlg: sigAlg,
+		publicKey: staticPublicKey(&JSONWebKey{
+			Key: privateKey.Public(),
+		}),
+		signer: &pqcDecrypterSigner{
+			privateKey: privateKey,
 		},
 	}, nil
 }
@@ -190,6 +229,10 @@ func (ctx rsaEncrypterVerifier) encryptKey(cek []byte, alg KeyAlgorithm) (recipi
 	}, nil
 }
 
+func (ctx pqcEncrypterVerifier) encrypt(cek []byte, alg KeyAlgorithm) ([]byte, error) {
+	return nil, ErrUnsupportedAlgorithm
+}
+
 // Encrypt the given payload. Based on the key encryption algorithm,
 // this will either use RSA-PKCS1v1.5 or RSA-OAEP (with SHA-1 or SHA-256).
 func (ctx rsaEncrypterVerifier) encrypt(cek []byte, alg KeyAlgorithm) ([]byte, error) {
@@ -205,9 +248,19 @@ func (ctx rsaEncrypterVerifier) encrypt(cek []byte, alg KeyAlgorithm) ([]byte, e
 	return nil, ErrUnsupportedAlgorithm
 }
 
+
+// Decrypt the given payload and return the content encryption key.
+func (ctx pqcDecrypterSigner) decryptKey(headers rawHeader, recipient *recipientInfo, generator keyGenerator) ([]byte, error) {
+	return ctx.decrypt(recipient.encryptedKey, headers.getAlgorithm(), generator)
+}
+
 // Decrypt the given payload and return the content encryption key.
 func (ctx rsaDecrypterSigner) decryptKey(headers rawHeader, recipient *recipientInfo, generator keyGenerator) ([]byte, error) {
 	return ctx.decrypt(recipient.encryptedKey, headers.getAlgorithm(), generator)
+}
+
+func (ctx pqcDecrypterSigner) decrypt(jek []byte, alg KeyAlgorithm, generator keyGenerator) ([]byte, error) {
+	return nil, ErrUnsupportedAlgorithm
 }
 
 // Decrypt the given payload. Based on the key encryption algorithm,
@@ -260,6 +313,16 @@ func (ctx rsaDecrypterSigner) decrypt(jek []byte, alg KeyAlgorithm, generator ke
 }
 
 // Sign the given payload
+func (ctx pqcDecrypterSigner) signPayload(payload []byte, alg SignatureAlgorithm) (Signature, error) {
+	out, _ := ctx.privateKey.Sign(nil, payload, nil)
+
+	return Signature{
+		Signature: out,
+		protected: &rawHeader{},
+	}, nil
+}
+
+// Sign the given payload
 func (ctx rsaDecrypterSigner) signPayload(payload []byte, alg SignatureAlgorithm) (Signature, error) {
 	var hash crypto.Hash
 
@@ -300,6 +363,19 @@ func (ctx rsaDecrypterSigner) signPayload(payload []byte, alg SignatureAlgorithm
 		Signature: out,
 		protected: &rawHeader{},
 	}, nil
+}
+
+// Verify the given payload
+func (ctx pqcEncrypterVerifier) verifyPayload(payload []byte, signature []byte, alg SignatureAlgorithm) error {
+	signatureOk, err := ctx.publicKey.Verify(payload, signature)
+	if err != nil {
+		return err
+	}
+	
+	if signatureOk {
+		return nil
+	}
+	return ErrUnsupportedAlgorithm
 }
 
 // Verify the given payload
@@ -380,6 +456,20 @@ func (ctx ecEncrypterVerifier) encryptKey(cek []byte, alg KeyAlgorithm) (recipie
 		header:       &header,
 	}, nil
 }
+
+// Encrypt the given payload and update the object.
+func (ctx pqcEncrypterVerifier) encryptKey(cek []byte, alg KeyAlgorithm) (recipientInfo, error) {
+	encryptedKey, err := ctx.encrypt(cek, alg)
+	if err != nil {
+		return recipientInfo{}, err
+	}
+
+	return recipientInfo{
+		encryptedKey: encryptedKey,
+		header:       &rawHeader{},
+	}, nil
+}
+
 
 // Get key size for EC key generator
 func (ctx ecKeyGenerator) keySize() int {

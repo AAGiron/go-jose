@@ -19,6 +19,7 @@ package jose
 import (
 	"bytes"
 	"crypto/ecdsa"
+	"crypto/liboqs_sig"
 	"crypto/rsa"
 	"encoding/base64"
 	"errors"
@@ -174,6 +175,10 @@ func newVerifier(verificationKey interface{}) (payloadVerifier, error) {
 		return newVerifier(verificationKey.Key)
 	case *JSONWebKey:
 		return newVerifier(verificationKey.Key)
+	case *liboqs_sig.PublicKey:
+		return &pqcEncrypterVerifier{
+			publicKey: verificationKey,
+		}, nil	
 	}
 	if ov, ok := verificationKey.(OpaqueVerifier); ok {
 		return &opaqueVerifier{verifier: ov}, nil
@@ -205,6 +210,8 @@ func makeJWSRecipient(alg SignatureAlgorithm, signingKey interface{}) (recipient
 		return newJWKSigner(alg, signingKey)
 	case *JSONWebKey:
 		return newJWKSigner(alg, *signingKey)
+	case *liboqs_sig.PrivateKey:
+		return newPQCSigner(alg, signingKey)
 	}
 	if signer, ok := signingKey.(OpaqueSigner); ok {
 		return newOpaqueSigner(alg, signer)

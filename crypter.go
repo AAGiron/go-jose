@@ -18,6 +18,7 @@ package jose
 
 import (
 	"crypto/ecdsa"
+	"crypto/liboqs_sig"
 	"crypto/rsa"
 	"errors"
 	"fmt"
@@ -270,6 +271,8 @@ func makeJWERecipient(alg KeyAlgorithm, encryptionKey interface{}) (recipientKey
 		recipient, err := makeJWERecipient(alg, encryptionKey.Key)
 		recipient.keyID = encryptionKey.KeyID
 		return recipient, err
+	case *liboqs_sig.PublicKey:
+		return newPQCRecipient(alg, encryptionKey)
 	}
 	if encrypter, ok := encryptionKey.(OpaqueKeyEncrypter); ok {
 		return newOpaqueKeyEncrypter(alg, encrypter)
@@ -300,6 +303,10 @@ func newDecrypter(decryptionKey interface{}) (keyDecrypter, error) {
 		return newDecrypter(decryptionKey.Key)
 	case *JSONWebKey:
 		return newDecrypter(decryptionKey.Key)
+	case *liboqs_sig.PrivateKey:
+		return &pqcDecrypterSigner{
+			privateKey: decryptionKey,
+		}, nil
 	}
 	if okd, ok := decryptionKey.(OpaqueKeyDecrypter); ok {
 		return &opaqueKeyDecrypter{decrypter: okd}, nil

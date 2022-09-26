@@ -22,6 +22,7 @@ package cryptosigner
 import (
 	"crypto"
 	"crypto/ecdsa"
+	"crypto/liboqs_sig"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/asn1"
@@ -31,6 +32,8 @@ import (
 	"golang.org/x/crypto/ed25519"
 	"gopkg.in/square/go-jose.v2"
 )
+
+var joseLiboqsAlgorithms = []jose.SignatureAlgorithm{jose.Dilithium2, jose.Dilithium3, jose.Dilithium5, jose.Falcon512, jose.Falcon1024}
 
 // Opaque creates an OpaqueSigner from a "crypto".Signer
 func Opaque(s crypto.Signer) jose.OpaqueSigner {
@@ -59,6 +62,8 @@ func (s *cryptoSigner) Algs() []jose.SignatureAlgorithm {
 		return []jose.SignatureAlgorithm{jose.ES256, jose.ES384, jose.ES512}
 	case *rsa.PublicKey:
 		return []jose.SignatureAlgorithm{jose.RS256, jose.RS384, jose.RS512, jose.PS256, jose.PS384, jose.PS512}
+	case *liboqs_sig.PublicKey:
+		return joseLiboqsAlgorithms
 	default:
 		return nil
 	}
@@ -74,6 +79,8 @@ func (s *cryptoSigner) SignPayload(payload []byte, alg jose.SignatureAlgorithm) 
 		hash = crypto.SHA384
 	case jose.RS512, jose.PS512, jose.ES512:
 		hash = crypto.SHA512
+	case joseSigIsLiboqs(alg):
+		return s.signer.Sign(nil, payload, nil)
 	default:
 		return nil, jose.ErrUnsupportedAlgorithm
 	}
@@ -135,4 +142,13 @@ func (s *cryptoSigner) SignPayload(payload []byte, alg jose.SignatureAlgorithm) 
 		})
 	}
 	return out, err
+}
+
+func joseSigIsLiboqs(alg jose.SignatureAlgorithm) jose.SignatureAlgorithm {	
+	for _, v  := range joseLiboqsAlgorithms {
+		if v == alg {
+			return alg
+		}
+	}	
+	return jose.SignatureAlgorithm("")
 }

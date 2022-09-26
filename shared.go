@@ -110,6 +110,12 @@ const (
 	PS256 = SignatureAlgorithm("PS256") // RSASSA-PSS using SHA256 and MGF1-SHA256
 	PS384 = SignatureAlgorithm("PS384") // RSASSA-PSS using SHA384 and MGF1-SHA384
 	PS512 = SignatureAlgorithm("PS512") // RSASSA-PSS using SHA512 and MGF1-SHA512
+	Dilithium2 = SignatureAlgorithm("Dilithium2")
+	Dilithium3 = SignatureAlgorithm("Dilithium3")
+	Dilithium5 = SignatureAlgorithm("Dilithium5")
+	Falcon512 = SignatureAlgorithm("Falcon512")
+	Falcon1024 = SignatureAlgorithm("Falcon1024")
+
 )
 
 // Content encryption algorithms

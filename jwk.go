@@ -114,8 +114,12 @@ func (k JSONWebKey) MarshalJSON() ([]byte, error) {
 		raw, err = fromRsaPrivateKey(key)
 	case []byte:
 		raw, err = fromSymmetricKey(key)
+	case *liboqs_sig.PublicKey:
+		raw = fromPQCPublicKey(key)
 	case liboqs_sig.PublicKey:
 		raw = fromPQCPublicKey(&key)
+	case *liboqs_sig.PrivateKey:
+		raw, err = fromPQCPrivateKey(key)
 	case liboqs_sig.PrivateKey:
 		raw, err = fromPQCPrivateKey(&key)
 	default:
@@ -416,6 +420,16 @@ func (k *JSONWebKey) Thumbprint(hash crypto.Hash) ([]byte, error) {
 		input, err = rsaThumbprintInput(key.N, key.E)
 	case ed25519.PrivateKey:
 		input, err = edThumbprintInput(ed25519.PublicKey(key[32:]))
+	case liboqs_sig.PrivateKey:
+		_, _, pub := liboqs_sig.GetPrivateKeyMembers(&key)
+		input, err = pqcThumbprintInput(pub)
+	case *liboqs_sig.PrivateKey:
+		_, _, pub := liboqs_sig.GetPrivateKeyMembers(key)
+		input, err = pqcThumbprintInput(pub)
+	case liboqs_sig.PublicKey:
+		input, err = pqcThumbprintInput(&key)
+	case *liboqs_sig.PublicKey:
+		input, err = pqcThumbprintInput(key)
 	default:
 		return nil, fmt.Errorf("square/go-jose: unknown key type '%s'", reflect.TypeOf(key))
 	}

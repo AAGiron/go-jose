@@ -115,7 +115,15 @@ const (
 	Dilithium5 = SignatureAlgorithm("Dilithium5")
 	Falcon512 = SignatureAlgorithm("Falcon512")
 	Falcon1024 = SignatureAlgorithm("Falcon1024")
-
+	SphincsShake128sSimple = SignatureAlgorithm("sphincs+-shake256-128s-simple")
+	SphincsShake256sSimple = SignatureAlgorithm("sphincs+-SHAKE256-256s-simple")
+	P256_Dilithium2 = SignatureAlgorithm("P256_Dilithium2")
+	P256_Falcon512 = SignatureAlgorithm("P256_Falcon-512")
+	P256_SphincsShake128sSimple = SignatureAlgorithm("P256_sphincs+-shake256-128s-simple")
+	P384_Dilithium3 = SignatureAlgorithm("P384_Dilithium3")
+	P521_Dilithium5 = SignatureAlgorithm("P521_Dilithium5")
+	P521_Falcon1024 = SignatureAlgorithm("P521_Falcon-1024")
+	P521_SphincsShake256sSimple = SignatureAlgorithm("P521_sphincs+-SHAKE256-256s-simple")
 )
 
 // Content encryption algorithms

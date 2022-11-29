@@ -40,7 +40,10 @@ import (
 	"gopkg.in/square/go-jose.v2/json"
 )
 
-var liboqsAlgorithmsStrings = []string{"Dilithium2", "Dilithium3", "Dilithium5", "Falcon512", "Falcon1024"}
+var liboqsAlgorithmsStrings = []string{	"Dilithium2", "Dilithium3", "Dilithium5", "Falcon-512", "Falcon-1024", "sphincs+-shake256-128s-simple", "sphincs+-SHAKE256-256s-simple", 
+										"P256_Dilithium2", "P256_Falcon-512", "P256_sphincs+-shake256-128s-simple", 
+										"P384_Dilithium3", 
+										"P521_Dilithium5", "P521_Falcon-1024", "P521_sphincs+-SHAKE256-256s-simple"}
 
 // rawJSONWebKey represents a public or private key in JWK format, used for parsing/serializing.
 type rawJSONWebKey struct {
@@ -358,6 +361,7 @@ const rsaThumbprintTemplate = `{"e":"%s","kty":"RSA","n":"%s"}`
 const ecThumbprintTemplate = `{"crv":"%s","kty":"EC","x":"%s","y":"%s"}`
 const edThumbprintTemplate = `{"crv":"%s","kty":"OKP","x":"%s"}`
 const pqcThumbprintTemplate = `{"pub":"%s","kty":"%s"}`
+const hybridThumbprintTemplate = `{"pub:"%s", crv":"%s","kty":"%s","x":"%s","y":"%s"}`
 
 func ecThumbprintInput(curve elliptic.Curve, x, y *big.Int) (string, error) {
 	coordLength := curveSize(curve)
@@ -379,7 +383,18 @@ func pqcThumbprintInput(k *liboqs_sig.PublicKey) (string, error) {
 
 	classicCurve, pqcBytes := liboqs_sig.GetPublicKeyMembers(k)
 	if classicCurve != nil {
-		panic("hybrid signature schemes are not supported.")
+		coordLength := curveSize(classicCurve.Curve)
+		crv, err := curveName(classicCurve.Curve)
+		if err != nil {
+			return "", err
+		}
+		if len(classicCurve.X.Bytes()) > coordLength || len(classicCurve.Y.Bytes()) > coordLength {
+			return "", errors.New("square/go-jose: invalid elliptic key (too large)")
+		}
+		return fmt.Sprintf(hybridThumbprintTemplate, newBuffer(pqcBytes).base64(), crv, 
+			newBuffer([]byte(liboqs_sig.SigIdtoName[k.SigId])).base64(), 
+			newFixedSizeBuffer(classicCurve.X.Bytes(), coordLength).base64(),
+			newFixedSizeBuffer(classicCurve.Y.Bytes(), coordLength).base64()), nil
 	}
 
 	return fmt.Sprintf(pqcThumbprintTemplate,
@@ -507,7 +522,9 @@ func (k *JSONWebKey) Valid() bool {
 	case *liboqs_sig.PublicKey:
 		classicCurve, pqcBytes := liboqs_sig.GetPublicKeyMembers(key)
 		if classicCurve != nil {
-			panic("hybrid signature schemes are not supported.")
+			if  classicCurve.X == nil || classicCurve.Y == nil {
+				return false
+			}
 		}
 		if pqcBytes == nil {
 			return false
@@ -521,7 +538,29 @@ func (k *JSONWebKey) Valid() bool {
 func (key rawJSONWebKey) pqcPublicKey() (*liboqs_sig.PublicKey, error) {
 	sigId := liboqs_sig.NameToSigID(key.Kty)
 	pqc := key.PQCPub.bytes()
-	return liboqs_sig.ConstructPublicKey(sigId, nil, pqc), nil	
+	var classic *ecdsa.PublicKey
+	classic = nil
+
+	if key.Crv != "" {
+		var crv elliptic.Curve
+
+		switch key.Crv {
+		case "P-256":
+			crv = elliptic.P256()
+		case "P-384":
+			crv = elliptic.P384()
+		case "P-521":
+			crv = elliptic.P521()	
+		}
+		
+		classic =  &ecdsa.PublicKey{
+			Curve: crv,
+			X:     key.X.bigInt(),
+			Y:     key.Y.bigInt(),}
+
+	}
+
+	return liboqs_sig.ConstructPublicKey(sigId, classic, pqc), nil	
 }
 
 func (key rawJSONWebKey) rsaPublicKey() (*rsa.PublicKey, error) {
@@ -538,7 +577,32 @@ func (key rawJSONWebKey) rsaPublicKey() (*rsa.PublicKey, error) {
 func fromPQCPublicKey(pub *liboqs_sig.PublicKey) *rawJSONWebKey {
 	classicCurve, pqcBytes := liboqs_sig.GetPublicKeyMembers(pub)
 	if classicCurve != nil {
-		panic("hybrid signature schemes are not supported.")
+		// panic("hybrid signature schemes are not supported.")
+
+		if classicCurve.X == nil || classicCurve.Y == nil {
+			panic("square/go-jose: invalid EC key (nil, or X/Y missing)")
+		}
+	
+		name, err := curveName(classicCurve.Curve)
+		if err != nil {
+			panic(err)
+		}
+
+		size := curveSize(classicCurve.Curve)
+		xBytes := classicCurve.X.Bytes()
+		yBytes := classicCurve.Y.Bytes()
+		
+		if len(xBytes) > size || len(yBytes) > size {
+			panic("square/go-jose: invalid EC key (X/Y too large)")
+		}
+		return &rawJSONWebKey{
+			Kty: liboqs_sig.SigIdtoName[pub.SigId],
+			Crv: name,
+			X:   newFixedSizeBuffer(xBytes, size),
+			Y:   newFixedSizeBuffer(yBytes, size),
+			PQCPub: newBuffer(pqcBytes),
+		}
+
 	}
 	
 	return &rawJSONWebKey{
@@ -722,9 +786,12 @@ func (key rawJSONWebKey) rsaPrivateKey() (*rsa.PrivateKey, error) {
 
 func fromPQCPrivateKey(pqc *liboqs_sig.PrivateKey) (*rawJSONWebKey, error) {
 
-	_, pqcBytes, pub := liboqs_sig.GetPrivateKeyMembers(pqc)
+	classicCurve, pqcBytes, pub := liboqs_sig.GetPrivateKeyMembers(pqc)
 
 	raw := fromPQCPublicKey(pub)
+	if classicCurve != nil {
+		raw.D = newFixedSizeBuffer(classicCurve.D.Bytes(), dSize(classicCurve.PublicKey.Curve))
+	}
 
 	raw.PQCPriv = newBuffer(pqcBytes)
 

@@ -314,7 +314,32 @@ func (ctx rsaDecrypterSigner) decrypt(jek []byte, alg KeyAlgorithm, generator ke
 
 // Sign the given payload
 func (ctx pqcDecrypterSigner) signPayload(payload []byte, alg SignatureAlgorithm) (Signature, error) {
-	out, _ := ctx.privateKey.Sign(nil, payload, nil)
+	
+	var hash crypto.Hash
+	var hashed []byte
+
+	switch alg {	
+	// Hybrid	
+	case	P256_Dilithium2, P256_Falcon512, P256_SphincsShake128sSimple, 
+			P384_Dilithium3,
+			P521_Dilithium5, P521_Falcon1024, P521_SphincsShake256sSimple:
+		
+		hash = crypto.SHA256
+		hasher := hash.New()
+
+		// According to documentation, Write() on hash never fails
+		_, _ = hasher.Write(payload)
+		hashed = hasher.Sum(nil)
+
+	// Pqc-only
+	default:
+		hash = crypto.Hash(0)
+		hashed = payload
+	}
+	
+	var signerOpts crypto.SignerOpts = hash 
+	
+	out, _ := ctx.privateKey.Sign(rand.Reader, hashed, signerOpts)
 
 	return Signature{
 		Signature: out,
@@ -367,7 +392,26 @@ func (ctx rsaDecrypterSigner) signPayload(payload []byte, alg SignatureAlgorithm
 
 // Verify the given payload
 func (ctx pqcEncrypterVerifier) verifyPayload(payload []byte, signature []byte, alg SignatureAlgorithm) error {
-	signatureOk, err := ctx.publicKey.Verify(payload, signature)
+	var hash crypto.Hash
+	var hashed []byte
+
+	switch alg {
+	case P256_Dilithium2, P256_Falcon512, P256_SphincsShake128sSimple,
+		 P384_Dilithium3,
+		 P521_Dilithium5, P521_Falcon1024, P521_SphincsShake256sSimple:	
+	
+		 hash = crypto.SHA256
+		hasher := hash.New()
+
+		// According to documentation, Write() on hash never fails
+		_, _ = hasher.Write(payload)
+		hashed = hasher.Sum(nil)
+	
+	default:
+		hashed = payload
+	}
+
+	signatureOk, err := ctx.publicKey.Verify(hashed, signature)
 	if err != nil {
 		return err
 	}

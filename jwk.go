@@ -244,7 +244,7 @@ func (k *JSONWebKey) UnmarshalJSON(data []byte) (err error) {
 		} else {
 			err = fmt.Errorf("square/go-jose: unknown curve %s'", raw.Crv)
 		}
-	case stringIsLiboqs(raw.Kty):
+	case StringIsLiboqs(raw.Kty):
 		if raw.PQCPriv != nil {
 			key, err = raw.pqcPrivateKey()
 			if err == nil {
@@ -923,7 +923,7 @@ func (key rawJSONWebKey) symmetricKey() ([]byte, error) {
 	return key.K.bytes(), nil
 }
 
-func stringIsLiboqs(alg string) string {
+func StringIsLiboqs(alg string) string {
 	for _, v  := range liboqsAlgorithmsStrings {
 		if v == alg {
 			return alg
